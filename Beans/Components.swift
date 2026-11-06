@@ -493,30 +493,40 @@ struct CoverImage: View {
             .fill(Color.beansGlassFill)
             .frame(width: size, height: size)
             .overlay {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                            .frame(width: size, height: size)
-                            .clipped()
-                    case .failure:
-                        placeholderIcon
-                    case .empty:
-                        if url == nil {
-                            // 封面地址为空时：直接显示占位图标，避免一直转圈
+                // 预取命中直接渲染内存里的图（切歌瞬间就有封面，不用等网络）；
+                // 未命中走原来的 AsyncImage，行为不变。
+                if let cached = BeansCoverPrefetch.cachedImage(for: url) {
+                    Image(uiImage: cached)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: size, height: size)
+                        .clipped()
+                } else {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                                .frame(width: size, height: size)
+                                .clipped()
+                        case .failure:
                             placeholderIcon
-                        } else {
-                            ZStack {
+                        case .empty:
+                            if url == nil {
+                                // 封面地址为空时：直接显示占位图标，避免一直转圈
                                 placeholderIcon
-                                ProgressView().tint(Color.beansAmber)
+                            } else {
+                                ZStack {
+                                    placeholderIcon
+                                    ProgressView().tint(Color.beansAmber)
+                                }
                             }
+                        @unknown default:
+                            placeholderIcon
                         }
-                    @unknown default:
-                        placeholderIcon
                     }
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 }
-                .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }

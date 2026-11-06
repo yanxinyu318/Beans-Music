@@ -461,9 +461,31 @@ final class PlayerManager: NSObject, ObservableObject {
         updateNowPlaying()
     }
 
+    /// 预取上一首/下一首的封面：当前歌曲播放期间就把相邻两首的封面下好，
+    /// 滑动切歌时新封面已在内存里，CoverImage 直接渲染，不用等网络现下。
+    private func prefetchAdjacentCovers() {
+        guard queue.count > 1 else { return }
+        let count = queue.count
+        let nextIndex: Int
+        let prevIndex: Int
+        if playMode == .shuffle, playOrder.count == count {
+            nextIndex = playOrder[(orderPosition + 1) % count]
+            prevIndex = playOrder[(orderPosition - 1 + count) % count]
+        } else {
+            nextIndex = (currentIndex + 1) % count
+            prevIndex = (currentIndex - 1 + count) % count
+        }
+        BeansCoverPrefetch.prefetch([
+            queue.indices.contains(nextIndex) ? queue[nextIndex].coverURL : nil,
+            queue.indices.contains(prevIndex) ? queue[prevIndex].coverURL : nil,
+            currentSong?.coverURL,
+        ])
+    }
+
     private func loadCurrent(resumeAt: Double? = nil, forceKugouStandard: Bool = false) {
         guard ensurePlaybackAllowed() else { return }
         guard let song = currentSong else { return }
+        prefetchAdjacentCovers()
         loadGeneration += 1
         let generation = loadGeneration
         thirdPartyRetryExcludedHostsBySong.removeValue(forKey: song.identityKey)

@@ -52,6 +52,8 @@ struct ReferencePlaybackView: View {
     @AppStorage("beans.swipeSwitchSong") private var swipeSwitchSong = true
     /// 左右滑动切歌时封面/歌词区的跟手位移
     @State private var swipeOffset: CGFloat = 0
+    /// 飞出/飞入动画进行中时忽略新的滑动，避免快速连续滑动时两次切歌互相打架、封面跳变。
+    @State private var swipeFlying = false
 
     private func layoutEntry(_ part: AppleMusicLayoutPart) -> PlayerLayoutEntry {
         appleLayout.entry(for: part)
@@ -590,9 +592,9 @@ struct ReferencePlaybackView: View {
 
     /// 左右滑动切歌手势：用 simultaneousGesture，歌词上下滚动仍可用，只有横向占优时才跟手移动。
     private var swipeGesture: some Gesture {
-        DragGesture(minimumDistance: 20)
+        DragGesture(minimumDistance: 15)
             .onChanged { value in
-                guard swipeSwitchSong else { return }
+                guard swipeSwitchSong, !swipeFlying else { return }
                 let x = value.translation.width
                 if abs(x) > abs(value.translation.height) {
                     swipeOffset = x
@@ -609,6 +611,7 @@ struct ReferencePlaybackView: View {
             withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { swipeOffset = 0 }
             return
         }
+        guard !swipeFlying else { return }
         if horizontal < -70 {
             BeansHaptics.tap()
             flySwipe(direction: -1)
@@ -623,21 +626,25 @@ struct ReferencePlaybackView: View {
     private func flySwipe(direction: CGFloat) {
         let flyOut: CGFloat = direction * 560
         let flyIn: CGFloat = -direction * 560
-        // 1) 当前封面继续向滑动方向飞出
-        withAnimation(.easeIn(duration: 0.17)) { swipeOffset = flyOut }
-        // 2) 飞出后立即切歌，并把新封面放到对侧屏幕外，再滑回中央
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) {
+        swipeFlying = true
+        // 1) 当前封面继续向滑动方向飞出（0.12s，比原来更快，减少松手后的等待感）
+        withAnimation(.easeIn(duration: 0.12)) { swipeOffset = flyOut }
+        // 2) 飞出后立即切歌，并把新封面放到对侧屏幕外，再用弹簧滑回中央。
+        // 新封面已由播放器提前预取进内存，飞入时直接渲染，不用等网络现下。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
             // 动画期间开关被关闭：直接复位，避免卡在屏幕外
             guard swipeSwitchSong else {
-                withAnimation(.easeOut(duration: 0.2)) { swipeOffset = 0 }
+                withAnimation(.spring(response: 0.30, dampingFraction: 0.85)) { swipeOffset = 0 }
+                swipeFlying = false
                 return
             }
             if direction < 0 { player.next() } else { player.previous() }
             swipeOffset = flyIn
             // 等下一帧先渲染出新封面在屏幕外的位置，再动画滑回中央（否则动画会从旧位置开始，方向不对）
             DispatchQueue.main.async {
-                withAnimation(.easeOut(duration: 0.26)) { swipeOffset = 0 }
+                withAnimation(.spring(response: 0.30, dampingFraction: 0.85)) { swipeOffset = 0 }
             }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) { swipeFlying = false }
         }
     }
 

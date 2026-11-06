@@ -42,6 +42,8 @@ struct ProfileView: View {
     @State private var didRefreshProfileAccount = false
     @State private var donationExpanded = false
     @State private var showWeChatOpenError = false
+    /// “我的”页歌单区点开的歌单（用 sheet 打开歌单详情）
+    @State private var selectedPlaylist: Playlist?
     @ObservedObject private var qqAuth = QQMusicAuth.shared
     @ObservedObject private var kugouAuth = KugouMusicAuth.shared
     @ObservedObject private var platformPrefs = PlatformPreferenceStore.shared
@@ -187,11 +189,8 @@ struct ProfileView: View {
                             EmptyView()
                         }
                     }
-                    // 更新入口固定放在“我的”页面最底部，避免被板块排序隐藏。
-                    updateLinkCard
-                    communityCard
-                    donationCard
-                    profileVersionFooter
+                    // “我的”页底部原先的更新/交流群/赞助/版本入口已去掉，改为我的歌单（与音乐库同一份网易云歌单）。
+                    myPlaylistsSection
                 }
                 .padding(.horizontal, isNativeClean ? 24 : 16)
                 .padding(.top, isNativeClean ? 14 : 8)
@@ -227,6 +226,12 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showAccountHub) {
             AccountHubSheet()
+                .environmentObject(auth)
+                .environmentObject(theme)
+        }
+        .sheet(item: $selectedPlaylist) { playlist in
+            PlaylistView(playlist: playlist)
+                .environmentObject(player)
                 .environmentObject(auth)
                 .environmentObject(theme)
         }
@@ -564,7 +569,63 @@ struct ProfileView: View {
         updateShareFileURL = nil
     }
 
+    /// “我的”页底部的我的歌单：与音乐库同一份网易云歌单（按音乐库的排序），点开进歌单详情。
+    /// 新建/删除歌单仍在音乐库页操作，这里只做查看与打开。
+    private var orderedNeteasePlaylists: [Playlist] {
+        SyncedPlaylistOrderStore.shared.ordered(auth.playlists, source: .netease)
+    }
+
+    private var myPlaylistsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "我的歌单", trailing: nil)
+            if !auth.isLoggedIn {
+                EmptyStateView(icon: "music.note.list", text: "登录网易云音乐后即可查看你的歌单")
+            } else if orderedNeteasePlaylists.isEmpty {
+                EmptyStateView(icon: "music.note.list", text: "暂无歌单")
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(orderedNeteasePlaylists) { playlist in
+                        Button {
+                            BeansHaptics.tap()
+                            selectedPlaylist = playlist
+                        } label: {
+                            HStack(spacing: 12) {
+                                CoverImage(url: playlist.coverURL, size: 56, cornerRadius: 12)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(playlist.name)
+                                        .font(BeansFont.appFont(15, .medium))
+                                        .foregroundStyle(Color.beansLabel)
+                                        .lineLimit(1)
+                                    Text(beansSongCountText(playlist.trackCount))
+                                        .font(BeansFont.appFont(12))
+                                        .foregroundStyle(Color.beansComment)
+                                }
+                                Spacer(minLength: 8)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(Color.beansComment.opacity(0.6))
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Divider().overlay(Color.beansComment.opacity(0.12))
+                    }
+                }
+                .padding(.vertical, 6)
+                .background {
+                    BeansGlass(shape: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .beansCardShadow(radius: 9, y: 3)
+            }
+        }
+    }
+
     /// 更新地址 + 检查更新（GitHub 项目，可点击交互）
+    /// 注意：以下 updateLinkCard / communityCard / donationCard / profileVersionFooter
+    /// 已不再渲染在“我的”页（底部改放我的歌单），定义保留以备恢复。
     private var updateLinkCard: some View {
         VStack(spacing: 0) {
             Button {
