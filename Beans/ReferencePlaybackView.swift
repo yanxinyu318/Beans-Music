@@ -48,6 +48,10 @@ struct ReferencePlaybackView: View {
     @State private var lyricsViewportHeight: CGFloat = 0
     @State private var isDraggingLyrics = false
     @State private var resumeTask: Task<Void, Never>?
+    /// 左右滑动切歌开关：与经典/黑胶播放器共用同一开关（播放器设置里“左右滑动切歌”），默认开启
+    @AppStorage("beans.swipeSwitchSong") private var swipeSwitchSong = true
+    /// 左右滑动切歌时封面/歌词区的跟手位移
+    @State private var swipeOffset: CGFloat = 0
 
     private func layoutEntry(_ part: AppleMusicLayoutPart) -> PlayerLayoutEntry {
         appleLayout.entry(for: part)
@@ -78,6 +82,11 @@ struct ReferencePlaybackView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .animation(.easeInOut(duration: 0.22), value: showLyrics)
+                    // 左右滑动切歌：左滑下一首、右滑上一首，封面跟手移动后飞出、新封面从对侧滑入。
+                    // 只挂在封面/歌词区：进度条、音量条、控制按钮各自有横向拖动手势，不抢。
+                    .offset(x: swipeOffset)
+                    .opacity(1 - min(abs(swipeOffset) / 260, 0.35))
+                    .simultaneousGesture(swipeGesture)
 
                     playbackControls(bottomInset: geometry.safeAreaInsets.bottom)
                 }
@@ -577,6 +586,59 @@ struct ReferencePlaybackView: View {
                 BeansHaptics.medium()
                 onComments()
             }
+    }
+
+    /// 左右滑动切歌手势：用 simultaneousGesture，歌词上下滚动仍可用，只有横向占优时才跟手移动。
+    private var swipeGesture: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onChanged { value in
+                guard swipeSwitchSong else { return }
+                let x = value.translation.width
+                if abs(x) > abs(value.translation.height) {
+                    swipeOffset = x
+                }
+            }
+            .onEnded { value in
+                handleSwipeEnd(horizontal: value.translation.width)
+            }
+    }
+
+    /// 左右切歌：滑动超过 70pt 松手切歌，不足则弹回原位。左滑下一首，右滑上一首。
+    private func handleSwipeEnd(horizontal: CGFloat) {
+        guard swipeSwitchSong else {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { swipeOffset = 0 }
+            return
+        }
+        if horizontal < -70 {
+            BeansHaptics.tap()
+            flySwipe(direction: -1)
+        } else if horizontal > 70 {
+            BeansHaptics.tap()
+            flySwipe(direction: 1)
+        } else {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { swipeOffset = 0 }
+        }
+    }
+
+    private func flySwipe(direction: CGFloat) {
+        let flyOut: CGFloat = direction * 560
+        let flyIn: CGFloat = -direction * 560
+        // 1) 当前封面继续向滑动方向飞出
+        withAnimation(.easeIn(duration: 0.17)) { swipeOffset = flyOut }
+        // 2) 飞出后立即切歌，并把新封面放到对侧屏幕外，再滑回中央
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) {
+            // 动画期间开关被关闭：直接复位，避免卡在屏幕外
+            guard swipeSwitchSong else {
+                withAnimation(.easeOut(duration: 0.2)) { swipeOffset = 0 }
+                return
+            }
+            if direction < 0 { player.next() } else { player.previous() }
+            swipeOffset = flyIn
+            // 等下一帧先渲染出新封面在屏幕外的位置，再动画滑回中央（否则动画会从旧位置开始，方向不对）
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: 0.26)) { swipeOffset = 0 }
+            }
+        }
     }
 
     private var primaryColor: Color {
