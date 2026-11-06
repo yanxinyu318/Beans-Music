@@ -54,6 +54,9 @@ struct ReferencePlaybackView: View {
     @State private var swipeOffset: CGFloat = 0
     /// 飞出/飞入动画进行中时忽略新的滑动，避免快速连续滑动时两次切歌互相打架、封面跳变。
     @State private var swipeFlying = false
+    /// 封面轮播的手指拖动位移（静止时为 0，中间页居中）；落页动画进行中时忽略新的滑动。
+    @State private var carouselDrag: CGFloat = 0
+    @State private var carouselBusy = false
 
     private func layoutEntry(_ part: AppleMusicLayoutPart) -> PlayerLayoutEntry {
         appleLayout.entry(for: part)
@@ -74,21 +77,16 @@ struct ReferencePlaybackView: View {
                                     insertion: .move(edge: .bottom).combined(with: .opacity),
                                     removal: .move(edge: .top).combined(with: .opacity)
                                 ))
+                                // 歌词页仍用旧的飞出/飞入切歌（歌词纵向滚动要保留，轮播只做封面页）
+                                .offset(x: swipeOffset)
+                                .opacity(1 - min(abs(swipeOffset) / 260, 0.35))
+                                .simultaneousGesture(swipeGesture)
                         } else {
-                            coverPage(size: geometry.size)
-                                .transition(.asymmetric(
-                                    insertion: .move(edge: .top).combined(with: .opacity),
-                                    removal: .move(edge: .top).combined(with: .opacity)
-                                ))
+                            coverCarousel(size: geometry.size)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .animation(.easeInOut(duration: 0.22), value: showLyrics)
-                    // 左右滑动切歌：左滑下一首、右滑上一首，封面跟手移动后飞出、新封面从对侧滑入。
-                    // 只挂在封面/歌词区：进度条、音量条、控制按钮各自有横向拖动手势，不抢。
-                    .offset(x: swipeOffset)
-                    .opacity(1 - min(abs(swipeOffset) / 260, 0.35))
-                    .simultaneousGesture(swipeGesture)
 
                     playbackControls(bottomInset: geometry.safeAreaInsets.bottom)
                 }
@@ -133,7 +131,88 @@ struct ReferencePlaybackView: View {
         }
     }
 
-    private func coverPage(size: CGSize) -> some View {
+    /// 封面轮播：上一首/当前/下一首三页横排，手指拖多远、下一页就跟进来多远，
+    /// 松手后弹簧滑到整页再切歌——和苹果自带音乐一样的翻页手感。
+    /// 旧的“飞出再飞入”之所以不丝滑，是因为拖的时候下一首封面根本不在屏幕上，
+    /// 只能先飞走旧的、再凭空变出新的，看起来像跳切；轮播让下一首一直都在旁边等着。
+    private func coverCarousel(size: CGSize) -> some View {
+        let width = size.width
+        return HStack(spacing: 0) {
+            if let prev = player.songBeforeCurrent {
+                coverPage(size: size, for: prev, isCurrent: false)
+                    .frame(width: width)
+            } else {
+                Color.clear.frame(width: width)
+            }
+            coverPage(size: size, for: song, isCurrent: true)
+                .frame(width: width)
+            if let next = player.songAfterCurrent {
+                coverPage(size: size, for: next, isCurrent: false)
+                    .frame(width: width)
+            } else {
+                Color.clear.frame(width: width)
+            }
+        }
+        .offset(x: carouselDrag)
+        .gesture(carouselGesture(pageWidth: width))
+    }
+
+    /// 轮播手势：横向占优才跟手；朝没有邻居的方向拖给阻尼、滑不进空白页。
+    private func carouselGesture(pageWidth: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 10)
+            .onChanged { value in
+                guard swipeSwitchSong, !carouselBusy else { return }
+                let x = value.translation.width
+                guard abs(x) > abs(value.translation.height) else { return }
+                if x < 0, player.songAfterCurrent == nil {
+                    carouselDrag = x * 0.25
+                } else if x > 0, player.songBeforeCurrent == nil {
+                    carouselDrag = x * 0.25
+                } else {
+                    carouselDrag = x
+                }
+            }
+            .onEnded { value in
+                handleCarouselEnd(value: value, pageWidth: pageWidth)
+            }
+    }
+
+    /// 松手判定：慢拖过 70pt 算切歌；快甩按速度预测（甩得快、拖得不远也算）。
+    /// 先弹簧滑到整页，等弹簧落稳再切歌并把位移悄悄归零——归零那一刻中间页已是新歌，
+    /// 看起来就是刚滑到的那一页，不会跳变。
+    private func handleCarouselEnd(value: DragGesture.Value, pageWidth: CGFloat) {
+        guard swipeSwitchSong, !carouselBusy else {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { carouselDrag = 0 }
+            return
+        }
+        let translation = value.translation.width
+        let predicted = value.predictedEndTranslation.width
+        let goNext = (translation < -70 || predicted < -pageWidth * 0.25) && player.songAfterCurrent != nil
+        let goPrev = (translation > 70 || predicted > pageWidth * 0.25) && player.songBeforeCurrent != nil
+        if goNext {
+            carouselBusy = true
+            BeansHaptics.tap()
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) { carouselDrag = -pageWidth }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
+                player.next()
+                carouselDrag = 0
+                carouselBusy = false
+            }
+        } else if goPrev {
+            carouselBusy = true
+            BeansHaptics.tap()
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) { carouselDrag = pageWidth }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
+                player.previous()
+                carouselDrag = 0
+                carouselBusy = false
+            }
+        } else {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { carouselDrag = 0 }
+        }
+    }
+
+    private func coverPage(size: CGSize, for displaySong: Song?, isCurrent: Bool) -> some View {
         let contentWidth = max(size.width - 64, 0)
         let artworkSize = min(contentWidth, min(size.height * 0.50, 390))
 
@@ -141,27 +220,27 @@ struct ReferencePlaybackView: View {
             Spacer(minLength: 8)
 
             CoverImage(
-                url: song?.coverURL,
+                url: displaySong?.coverURL,
                 size: artworkSize,
                 cornerRadius: 18,
-                emptyHint: player.isBuffering ? "等待开始播放…" : nil
+                emptyHint: isCurrent && player.isBuffering ? "等待开始播放…" : nil
             )
             .frame(width: artworkSize, height: artworkSize)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .shadow(color: .black.opacity(0.46), radius: 36, y: 18)
-            .scaleEffect(player.isPlaying ? 1 : 0.965)
+            .scaleEffect(isCurrent ? (player.isPlaying ? 1 : 0.965) : 1)
             .modifier(AppleMusicLayoutTransform(entry: layoutEntry(.cover)))
             .animation(.spring(response: 0.36, dampingFraction: 0.84), value: player.isPlaying)
 
             if showLyricPreview {
             VStack(spacing: 5) {
                 HStack(spacing: 9) {
-                    Text(song?.name ?? "未在播放")
+                    Text(displaySong?.name ?? "未在播放")
                         .font(BeansFont.appFont(22, .bold))
                         .foregroundStyle(primaryColor)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
-                    if showSongVIPBadge, song?.isVIP == true {
+                    if showSongVIPBadge, displaySong?.isVIP == true {
                         Text("VIP")
                             .font(BeansFont.appFont(9, .bold))
                             .foregroundStyle(.white)
@@ -170,7 +249,7 @@ struct ReferencePlaybackView: View {
                             .background(Color(red: 0.93, green: 0.25, blue: 0.22), in: Capsule())
                     }
                 }
-                Text(subtitle)
+                Text(subtitle(for: displaySong))
                     .font(BeansFont.appFont(13.5, .medium))
                     .foregroundStyle(secondaryColor)
                     .lineLimit(1)
@@ -180,21 +259,51 @@ struct ReferencePlaybackView: View {
             .padding(.top, 22)
             .modifier(AppleMusicLayoutTransform(entry: layoutEntry(.title)))
 
-            MiniLyricsPreview(lines: previewLyrics, primary: primaryColor, secondary: secondaryColor) {
-                guard !lyrics.isEmpty else { return }
-                BeansHaptics.tap()
-                showLyrics = true
-            }
-            .padding(.top, 18)
-            .modifier(AppleMusicLayoutTransform(entry: layoutEntry(.previewLyric)))
+            if isCurrent {
+                MiniLyricsPreview(lines: previewLyrics, primary: primaryColor, secondary: secondaryColor) {
+                    guard !lyrics.isEmpty else { return }
+                    BeansHaptics.tap()
+                    showLyrics = true
+                }
+                .padding(.top, 18)
+                .modifier(AppleMusicLayoutTransform(entry: layoutEntry(.previewLyric)))
             } else {
-                compactTrackHeader
-                    .padding(.top, 22)
+                // 相邻页不显示“暂无歌词”，留出同样高度的空白，保持三页版式一致、滑动时不跳动。
+                Color.clear
+                    .frame(maxWidth: 420, minHeight: 92)
+                    .padding(.top, 18)
+            }
+            } else {
+                if isCurrent {
+                    compactTrackHeader
+                        .padding(.top, 22)
+                } else {
+                    staticTrackHeader(for: displaySong)
+                        .padding(.top, 22)
+                }
             }
 
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 32)
+    }
+
+    /// 相邻页的静态标题行（不带收藏/菜单按钮，避免在非当前歌曲上误操作）。
+    private func staticTrackHeader(for displaySong: Song?) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displaySong?.name ?? "未在播放")
+                    .font(BeansFont.appFont(16, .semibold))
+                    .foregroundStyle(primaryColor)
+                    .lineLimit(1)
+                Text(subtitle(for: displaySong))
+                    .font(BeansFont.appFont(12, .medium))
+                    .foregroundStyle(secondaryColor)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: 420)
     }
 
     private var compactTrackHeader: some View {
@@ -503,9 +612,11 @@ struct ReferencePlaybackView: View {
         isDraggingLyrics ? focusedLyricID : (focusedLyricID ?? currentPlaybackLyricID)
     }
 
-    private var subtitle: String {
-        guard let song else { return "" }
-        let parts = [song.artists, song.album].filter { !$0.isEmpty }
+    private var subtitle: String { subtitle(for: song) }
+
+    private func subtitle(for displaySong: Song?) -> String {
+        guard let displaySong else { return "" }
+        let parts = [displaySong.artists, displaySong.album].filter { !$0.isEmpty }
         return parts.isEmpty ? "未知歌曲" : parts.joined(separator: " · ")
     }
 
@@ -590,7 +701,8 @@ struct ReferencePlaybackView: View {
             }
     }
 
-    /// 左右滑动切歌手势：用 simultaneousGesture，歌词上下滚动仍可用，只有横向占优时才跟手移动。
+    /// 歌词页的左右滑动切歌手势（封面页已改用三页轮播，不再走这里）。
+    /// 用 simultaneousGesture，歌词上下滚动仍可用，只有横向占优时才跟手移动。
     private var swipeGesture: some Gesture {
         DragGesture(minimumDistance: 15)
             .onChanged { value in

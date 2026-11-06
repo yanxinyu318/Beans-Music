@@ -152,6 +152,25 @@ final class PlayerManager: NSObject, ObservableObject {
         queue.indices.contains(currentIndex) ? queue[currentIndex] : nil
     }
 
+    /// 封面轮播用的上一首/下一首，与 next()/previous() 的顺序逻辑一致（含随机模式）。
+    /// 单曲循环时“下一首”就是当前这首（切歌是重头播放），轮播页显示同一首、滑过去即重播。
+    var songBeforeCurrent: Song? {
+        guard queue.count > 1 else { return nil }
+        if playMode == .shuffle, playOrder.count == queue.count, playOrder.indices.contains(orderPosition) {
+            return queue[playOrder[(orderPosition - 1 + playOrder.count) % playOrder.count]]
+        }
+        return queue[(currentIndex - 1 + queue.count) % queue.count]
+    }
+
+    var songAfterCurrent: Song? {
+        guard queue.count > 1 else { return nil }
+        if playMode == .repeatOne { return currentSong }
+        if playMode == .shuffle, playOrder.count == queue.count, playOrder.indices.contains(orderPosition) {
+            return queue[playOrder[(orderPosition + 1) % playOrder.count]]
+        }
+        return queue[(currentIndex + 1) % queue.count]
+    }
+
     override init() {
         super.init()
         if let raw = defaults.string(forKey: playModeKey),
