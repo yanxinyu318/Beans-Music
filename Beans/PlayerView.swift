@@ -2791,6 +2791,9 @@ struct PlayerView: View {
         case .kugou:
             let encoded = song.name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? song.name
             return URL(string: "https://www.kugou.com/yy/html/search.html#searchType=song&searchKeyWord=\(encoded)")
+        case .qishui:
+            // 汽水音乐本版无稳定分享链接，返回 nil（调用方已处理为不显示分享）
+            return nil
         }
     }
 
@@ -2921,7 +2924,12 @@ struct PlayerView: View {
             guard self.song?.identityKey == identity else { return }
             self.lyrics = parsed
         }
-        if song.source == .kugou, let hash = song.kugouHash {
+        if song.source == .qishui, let trackId = song.qishuiTrackId {
+            // 汽水歌词已在 API 层转成标准 LRC；上游没有歌词时 lyric 为空串，
+            // parse 后为空，播放器按现有“暂无歌词”空态显示
+            let audio = await QishuiMusicAPI.shared.songAudioAndLyric(trackId: trackId)
+            apply(LyricParser.parse(audio.lyric))
+        } else if song.source == .kugou, let hash = song.kugouHash {
             let raw = await KugouMusicAPI.shared.lyric(hash: hash, duration: song.duration)
             apply(LyricParser.parse(raw))
         } else if song.source == .qq, let mid = song.qqMid {

@@ -467,6 +467,7 @@ struct DiscoverView: View {
         case .netease: return neteaseTopLists.count
         case .qq: return qqTopLists.count
         case .kugou: return kugouTopLists.count
+        case .qishui: return 0
         }
     }
 
@@ -480,6 +481,7 @@ struct DiscoverView: View {
         case .netease: return !topLists.isEmpty
         case .qq: return !qqTopLists.isEmpty
         case .kugou: return !kugouTopLists.isEmpty
+        case .qishui: return false
         }
     }
 
@@ -1147,6 +1149,7 @@ struct DiscoverView: View {
         case .netease: return "推荐歌单"
         case .qq: return "QQ音乐热门歌单"
         case .kugou: return "歌单广场"
+        case .qishui: return "汽水音乐推荐歌单"
         }
     }
 
@@ -1155,6 +1158,7 @@ struct DiscoverView: View {
         case .netease: return "推荐歌单暂时没有内容"
         case .qq: return "QQ音乐热门歌单暂未加载成功\n下拉刷新可重新获取"
         case .kugou: return "歌单广场暂时没有内容"
+        case .qishui: return "汽水音乐推荐歌单暂时没有内容\n下拉刷新可重新获取"
         }
     }
 
@@ -1352,6 +1356,9 @@ struct DiscoverView: View {
             snapshot.dailySongs = daily
             snapshot.kugouTopLists = top
             snapshot.personalized = pp
+        case .qishui:
+            // 汽水音乐发现页只有推荐歌单：无每日推荐、无排行榜、无登录
+            snapshot.personalized = await QishuiMusicAPI.shared.recommendPlaylists(limit: 12)
         }
         return snapshot
     }
@@ -2168,6 +2175,9 @@ private struct HomeUnifiedSearchSheet: View {
             return (try? await QQMusicAPI.shared.searchSongs(keyword: keyword, limit: 30)) ?? []
         case .kugou:
             return (try? await KugouMusicAPI.shared.searchSongs(keyword: keyword, limit: 30)) ?? []
+        case .qishui:
+            // 汽水音乐没有歌曲搜索，首页聚合搜索不返回汽水单曲
+            return []
         }
     }
 

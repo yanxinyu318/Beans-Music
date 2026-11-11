@@ -100,6 +100,9 @@ enum ThirdPartyAudioQuality: String, CaseIterable, Identifiable, Sendable {
             return allCases
         case "wy":
             return [.kb128, .kb320, .flac, .flac24bit, .hires, .atmos, .master]
+        case "qs":
+            // 汽水音乐：分享页音频只有约 64kbps，不提供无损档位
+            return [.kb128, .kb320]
         case "git":
             return [.kb128, .kb320, .flac]
         default:
@@ -112,6 +115,7 @@ enum ThirdPartyAudioQuality: String, CaseIterable, Identifiable, Sendable {
         case .netease: return supported(providerCode: "wy")
         case .qq: return supported(providerCode: "tx")
         case .kugou: return supported(providerCode: "kg")
+        case .qishui: return supported(providerCode: "qs")
         }
     }
 
@@ -138,11 +142,12 @@ enum ThirdPartyAudioQuality: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// 歌曲来源（网易云 / QQ音乐 / 酷狗音乐）
+/// 歌曲来源（网易云 / QQ音乐 / 酷狗音乐 / 汽水音乐）
 enum SongSource: String, Codable, Sendable {
     case netease
     case qq
     case kugou
+    case qishui
 
     /// 兼容旧版本地收藏：未知或已下线来源统一回退为网易云
     init(from decoder: Decoder) throws {
@@ -169,6 +174,9 @@ struct Song: Identifiable, Hashable, Codable {
     let kugouAlbumAudioId: String?
     let kugouAlbumId: String?
     let kugouQualityHashes: [String: String]?
+    /// 汽水音乐 19 位数字曲目 id（完整字符串；Song.id 只存后 15 位转成的 Int，
+    /// 播放与歌词一律以 qishuiTrackId 为准）
+    let qishuiTrackId: String?
     /// 付费/VIP 标记（网易云：0 免费、1 VIP、4 付费单曲；QQ：0 免费、非 0 付费）
     let fee: Int
 
@@ -183,6 +191,7 @@ struct Song: Identifiable, Hashable, Codable {
         case .qq: return "qq-\(id)"
         case .kugou: return "kugou-\(id)"
         case .netease: return "netease-\(id)"
+        case .qishui: return "qishui-\(id)"
         }
     }
 
@@ -197,10 +206,13 @@ struct Song: Identifiable, Hashable, Codable {
             return fee != 0
         case .kugou:
             return fee != 0
+        case .qishui:
+            // 汽水音乐本版不区分 VIP，分享页音频统一按免费处理
+            return false
         }
     }
 
-    init(id: Int, name: String, artists: String, album: String, coverURL: URL?, duration: TimeInterval, source: SongSource = .netease, qqMid: String? = nil, qqMediaMid: String? = nil, kugouHash: String? = nil, kugouAlbumAudioId: String? = nil, kugouAlbumId: String? = nil, kugouQualityHashes: [String: String]? = nil, fee: Int = 0) {
+    init(id: Int, name: String, artists: String, album: String, coverURL: URL?, duration: TimeInterval, source: SongSource = .netease, qqMid: String? = nil, qqMediaMid: String? = nil, kugouHash: String? = nil, kugouAlbumAudioId: String? = nil, kugouAlbumId: String? = nil, kugouQualityHashes: [String: String]? = nil, fee: Int = 0, qishuiTrackId: String? = nil) {
         self.id = id
         self.name = name
         self.artists = artists
@@ -215,6 +227,7 @@ struct Song: Identifiable, Hashable, Codable {
         self.kugouAlbumId = kugouAlbumId
         self.kugouQualityHashes = kugouQualityHashes
         self.fee = fee
+        self.qishuiTrackId = qishuiTrackId
     }
 
     init?(json: [String: Any]) {
@@ -245,9 +258,10 @@ struct Song: Identifiable, Hashable, Codable {
         kugouAlbumId = nil
         kugouQualityHashes = nil
         fee = json["fee"] as? Int ?? 0
+        qishuiTrackId = nil
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, artists, album, coverURL, duration, source, qqMid, qqMediaMid, kugouHash, kugouAlbumAudioId, kugouAlbumId, kugouQualityHashes, fee }
+    private enum CodingKeys: String, CodingKey { case id, name, artists, album, coverURL, duration, source, qqMid, qqMediaMid, kugouHash, kugouAlbumAudioId, kugouAlbumId, kugouQualityHashes, fee, qishuiTrackId }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -265,6 +279,7 @@ struct Song: Identifiable, Hashable, Codable {
         kugouAlbumId = try c.decodeIfPresent(String.self, forKey: .kugouAlbumId)
         kugouQualityHashes = try c.decodeIfPresent([String: String].self, forKey: .kugouQualityHashes)
         fee = try c.decodeIfPresent(Int.self, forKey: .fee) ?? 0
+        qishuiTrackId = try c.decodeIfPresent(String.self, forKey: .qishuiTrackId)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -283,6 +298,7 @@ struct Song: Identifiable, Hashable, Codable {
         try c.encodeIfPresent(kugouAlbumId, forKey: .kugouAlbumId)
         try c.encodeIfPresent(kugouQualityHashes, forKey: .kugouQualityHashes)
         try c.encode(fee, forKey: .fee)
+        try c.encodeIfPresent(qishuiTrackId, forKey: .qishuiTrackId)
     }
 }
 
@@ -313,8 +329,12 @@ struct Playlist: Identifiable, Hashable, Codable {
     let specialType: Int
     /// 歌单来源（网易云 / QQ音乐），非网易云歌单用对应接口加载
     let source: SongSource
+    /// 汽水音乐 19 位数字歌单 id（完整字符串；Playlist.id 只存后 15 位转成的 Int，
+    /// 查详情时以 qishuiId 为准；其他平台为 nil。声明带默认值，旧缓存 JSON
+    /// 里没有这个键时合成 Codable 用 decodeIfPresent 解码，不会坏掉旧缓存）
+    let qishuiId: String? = nil
 
-    init(id: Int, name: String, coverURL: URL?, trackCount: Int = 0, source: SongSource = .netease) {
+    init(id: Int, name: String, coverURL: URL?, trackCount: Int = 0, source: SongSource = .netease, qishuiId: String? = nil) {
         self.id = id
         self.name = name
         self.coverURL = coverURL
@@ -322,6 +342,7 @@ struct Playlist: Identifiable, Hashable, Codable {
         self.creatorName = ""
         self.specialType = 0
         self.source = source
+        self.qishuiId = qishuiId
     }
 
     init?(json: [String: Any]) {

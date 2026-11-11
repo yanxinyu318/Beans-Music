@@ -42,10 +42,11 @@ enum SearchProvider: String, CaseIterable, Identifiable, Hashable {
     case netease = "网易云音乐"
     case qq = "QQ音乐"
     case kugou = "酷狗音乐"
+    case qishui = "汽水音乐"
 
     var id: String { rawValue }
 
-    /// 主题色渐变：网易云红 / QQ 绿
+    /// 主题色渐变：网易云红 / QQ 绿 / 酷狗蓝 / 汽水青绿
     var tint: LinearGradient {
         switch self {
         case .netease: return LinearGradient(
@@ -57,6 +58,9 @@ enum SearchProvider: String, CaseIterable, Identifiable, Hashable {
         case .kugou: return LinearGradient(
             colors: [Color(red: 0.12, green: 0.58, blue: 0.95), Color(red: 0.02, green: 0.32, blue: 0.72)],
             startPoint: .topLeading, endPoint: .bottomTrailing)
+        case .qishui: return LinearGradient(
+            colors: [Color(red: 0.05, green: 0.80, blue: 0.72), Color(red: 0.02, green: 0.45, blue: 0.58)],
+            startPoint: .topLeading, endPoint: .bottomTrailing)
         }
     }
 
@@ -65,6 +69,7 @@ enum SearchProvider: String, CaseIterable, Identifiable, Hashable {
         case .netease: return "cloud.fill"
         case .qq: return "play.rectangle.fill"
         case .kugou: return "music.note"
+        case .qishui: return "waveform"
         }
     }
 
@@ -73,6 +78,7 @@ enum SearchProvider: String, CaseIterable, Identifiable, Hashable {
         case .netease: return "BrandNetease"
         case .qq: return "BrandQQ"
         case .kugou: return "BrandKugou"
+        case .qishui: return nil
         }
     }
 }
@@ -104,6 +110,9 @@ struct SearchView: View {
     @State private var songResults: [Song] = []
     @State private var artistResults: [Artist] = []
     @State private var albumResults: [Album] = []
+    /// 汽水音乐搜索结果：只有歌单（汽水没有歌曲搜索，见 QishuiMusicAPI）
+    @State private var qishuiPlaylists: [Playlist] = []
+    @State private var selectedPlaylist: Playlist?
     @State private var hotWords: [String] = []
     @State private var searching = false
     @State private var errorMessage: String?
@@ -161,6 +170,7 @@ struct SearchView: View {
                 songResults = []
                 artistResults = []
                 albumResults = []
+                qishuiPlaylists = []
                 errorMessage = nil
                 return
             }
@@ -199,6 +209,14 @@ struct SearchView: View {
             AlbumDetailView(album: album)
                 .environmentObject(player)
                 .environmentObject(theme)
+        }
+        .sheet(item: $selectedPlaylist) { playlist in
+            BeansNavigationStack {
+                PlaylistView(playlist: playlist)
+                    .environmentObject(player)
+                    .environmentObject(auth)
+                    .environmentObject(theme)
+            }
         }
     }
 
@@ -250,12 +268,91 @@ struct SearchView: View {
     private var contentArea: some View {
         if keyword.isEmpty {
             hotSection
+        } else if provider == .qishui {
+            // 汽水音乐只有歌单搜索：不显示歌曲/歌手/专辑分类
+            qishuiPlaylistResultsArea
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 0) {
                 typeTabs
                 resultsArea
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// 汽水音乐歌单搜索结果：点歌单进歌单详情页，再点歌曲播放。
+    /// 标题明确写“歌单”，避免用户误以为搜到了单曲。
+    private var qishuiPlaylistResultsArea: some View {
+        Group {
+            if let errorMessage, qishuiPlaylists.isEmpty {
+                ErrorStateView(message: errorMessage) { submitSearch() }
+            } else if searching && qishuiPlaylists.isEmpty {
+                LoadingStateView()
+            } else if qishuiPlaylists.isEmpty {
+                EmptyStateView(icon: "music.note.list", text: "汽水音乐未找到相关歌单\n汽水不支持歌曲搜索，请换关键词搜歌单")
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        HStack {
+                            Text(beansLocalized("找到 \(qishuiPlaylists.count) 个歌单 · 汽水音乐", "Found \(qishuiPlaylists.count) playlists · Qishui Music"))
+                                .font(BeansFont.appFont(12))
+                                .foregroundStyle(Color.beansComment)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                                .truncationMode(.tail)
+                                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                                .layoutPriority(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 8)
+                        ForEach(qishuiPlaylists) { playlist in
+                            Button {
+                                BeansHaptics.tap()
+                                searchController.dismissKeyboard()
+                                selectedPlaylist = playlist
+                            } label: {
+                                HStack(spacing: 12) {
+                                    CoverImage(url: playlist.coverURL, size: 52, cornerRadius: 12)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(playlist.name)
+                                            .font(BeansFont.appFont(15, .medium))
+                                            .foregroundStyle(Color.beansLabel)
+                                            .lineLimit(1)
+                                        Text(playlist.trackCount > 0 ? beansSongCountText(playlist.trackCount) : "汽水音乐歌单")
+                                            .font(BeansFont.appFont(12))
+                                            .foregroundStyle(Color.beansComment)
+                                    }
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Color.beansComment)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
+                                .background {
+                                    BeansSurface(shape: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                }
+                            }
+                            .buttonStyle(GlassPressButtonStyle(scale: 0.97))
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 4)
+                    .padding(.bottom, 180)
+                }
+                .beansScrollIndicatorsHidden()
+                .beansScrollDismissesKeyboard()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .top) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Color.beansAmber)
+                        .padding(.top, 10)
+                        .opacity(searching ? 1 : 0)
+                }
+            }
         }
     }
 
@@ -271,7 +368,9 @@ struct SearchView: View {
             SearchTextField(
                 text: $keyword,
                 controller: searchController,
-                placeholder: beansLocalized("搜索歌曲、歌手、专辑", "Search songs, artists, or albums"),
+                placeholder: provider == .qishui
+                    ? beansLocalized("搜索汽水歌单", "Search Qishui playlists")
+                    : beansLocalized("搜索歌曲、歌手、专辑", "Search songs, artists, or albums"),
                 textColor: UIColor.beansLabel,
                 onSubmit: { text in
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -297,6 +396,7 @@ struct SearchView: View {
                     songResults = []
                     artistResults = []
                     albumResults = []
+                    qishuiPlaylists = []
                     errorMessage = nil
                     debounceTask?.cancel()
                 } label: {
@@ -437,8 +537,10 @@ struct SearchView: View {
                     historyStore.record(word)
                     Task { await startSearch(word) }
                 }
-                SectionHeader(title: provider == .netease ? "网易云音乐热搜" : provider == .qq ? "QQ音乐热搜" : "酷狗音乐热搜")
-                if hotWords.isEmpty {
+                SectionHeader(title: provider == .netease ? "网易云音乐热搜" : provider == .qq ? "QQ音乐热搜" : provider == .qishui ? "汽水音乐" : "酷狗音乐热搜")
+                if provider == .qishui {
+                    EmptyStateView(icon: "music.note.list", text: "汽水音乐没有热搜榜\n直接输入关键词搜歌单")
+                } else if hotWords.isEmpty {
                     LoadingStateView()
                 } else {
                     if #available(iOS 16, *) {
@@ -772,6 +874,11 @@ struct SearchView: View {
     }
 
     private func loadHotWords() async {
+        if provider == .qishui {
+            // 汽水音乐没有热搜榜：不请求网易云热搜，热搜区显示提示
+            hotWords = []
+            return
+        }
         if provider == .qq {
             if let words = try? await QQMusicAPI.shared.hotKeys() {
                 hotWords = words
@@ -847,9 +954,18 @@ struct SearchView: View {
                     let albums = try await KugouMusicAPI.shared.searchAlbums(keyword: trimmed)
                     guard !Task.isCancelled else { return }
                     await MainActor.run { albumResults = albums }
+                case (.qishui, _):
+                    // 汽水音乐没有歌曲/歌手/专辑搜索：任何分类都走歌单搜索
+                    let playlists = await QishuiMusicAPI.shared.searchPlaylists(keyword: trimmed)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        qishuiPlaylists = playlists
+                        if !playlists.isEmpty { BeansHaptics.success() }
+                    }
                 }
                 let count = await MainActor.run {
-                    selectedType == .song ? songResults.count : (selectedType == .artist ? artistResults.count : albumResults.count)
+                    selectedProvider == .qishui ? qishuiPlaylists.count
+                        : selectedType == .song ? songResults.count : (selectedType == .artist ? artistResults.count : albumResults.count)
                 }
                 BeansLogger.shared.log("搜索完成：\(selectedProvider.rawValue) [\(selectedType.rawValue)] \(trimmed) 结果=\(count)", level: .info)
             } catch {
@@ -980,6 +1096,9 @@ struct AlbumDetailView: View {
                         (try? await KugouMusicAPI.shared.searchSongs(keyword: query, limit: 100)) ?? []
                     }
                 )
+            case .qishui:
+                // 汽水音乐没有专辑搜索，专辑详情恒为空（正常情况下到不了这里）
+                result = []
             }
             if !result.isEmpty {
                 cache.save(result, for: cacheKey)

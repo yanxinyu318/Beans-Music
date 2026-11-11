@@ -712,6 +712,9 @@ struct LocalSearchAddSheet: View {
                     songs = try await QQMusicAPI.shared.searchSongs(keyword: trimmed)
                 case .kugou:
                     songs = try await KugouMusicAPI.shared.searchSongs(keyword: trimmed)
+                case .qishui:
+                    // 汽水音乐没有歌曲搜索，不能从搜索加歌到本地歌单
+                    songs = []
                 }
                 guard !Task.isCancelled else { return }
                 results = songs

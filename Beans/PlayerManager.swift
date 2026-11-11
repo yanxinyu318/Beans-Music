@@ -549,6 +549,11 @@ final class PlayerManager: NSObject, ObservableObject {
                         enableUnblock: enableUnblock
                     )
                 }
+            } else if song.source == .qishui, let trackId = song.qishuiTrackId {
+                // 汽水音乐：播放地址现取现用（分享页直链，约 64kbps，签名会过期），
+                // 不走第三方解锁，没有兜底；取不到地址就走统一失败流程
+                let audio = await QishuiMusicAPI.shared.songAudioAndLyric(trackId: trackId)
+                urlString = audio.audioURL
             } else if song.source == .qq, let mid = song.qqMid {
                 // QQ 官方地址失败后只走 QQ 第三方音源，不跨平台匹配同名歌曲。
                 let officialResult = try? await QQMusicAPI.shared.songURLResult(
@@ -1303,6 +1308,9 @@ final class PlayerManager: NSObject, ObservableObject {
                 quality: quality,
                 excludedHosts: excludedHosts
             )
+        case .qishui:
+            // 汽水音乐没有第三方解锁源：播放地址只走官方分享页直链
+            return nil
         }
     }
 
@@ -1471,6 +1479,9 @@ final class PlayerManager: NSObject, ObservableObject {
             return QQMusicAuth.shared.vipBadge != nil
         case .kugou:
             return KugouMusicAuth.shared.vipBadge != nil
+        case .qishui:
+            // 汽水音乐本版无登录、无会员概念
+            return false
         case .netease:
             guard let data = defaults.data(forKey: "beans.user"),
                   let user = try? JSONDecoder().decode(NetEaseUser.self, from: data) else {

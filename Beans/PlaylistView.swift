@@ -36,6 +36,8 @@ struct PlaylistView: View {
             return qqAuth.rawUin.isEmpty ? qqAuth.playlistUin : qqAuth.rawUin
         case .kugou:
             return KugouMusicAuth.shared.userId
+        case .qishui:
+            return "qishui"
         }
     }
 
@@ -185,7 +187,10 @@ struct PlaylistView: View {
         errorMessage = nil
         BeansLogger.shared.log("歌单页面打开 source=\(playlist.source.rawValue) id=\(playlist.id) name=\(playlist.name) advertisedCount=\(playlist.trackCount)", level: .info)
         do {
-            if playlist.source == .kugou {
+            if playlist.source == .qishui {
+                // 汽水歌单详情：用完整 19 位字符串 id；失败返回空列表，不抛错
+                tracks = await QishuiMusicAPI.shared.playlistDetail(playlistId: playlist.qishuiId ?? String(playlist.id))
+            } else if playlist.source == .kugou {
                 tracks = try await KugouMusicAPI.shared.playlistSongs(listID: playlist.id)
             } else if playlist.source == .qq {
                 tracks = try await QQMusicAPI.shared.playlistSongs(listID: playlist.id)

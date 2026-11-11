@@ -8,6 +8,7 @@ enum LibraryProvider: String, CaseIterable, Identifiable {
     case netease = "网易云音乐"
     case qq = "QQ音乐"
     case kugou = "酷狗音乐"
+    case qishui = "汽水音乐"
 
     var id: String { rawValue }
 
@@ -19,6 +20,8 @@ enum LibraryProvider: String, CaseIterable, Identifiable {
             return LinearGradient(colors: [Color(red: 0.15, green: 0.78, blue: 0.55), Color(red: 0.05, green: 0.58, blue: 0.42)], startPoint: .topLeading, endPoint: .bottomTrailing)
         case .kugou:
             return LinearGradient(colors: [Color(red: 0.12, green: 0.58, blue: 0.95), Color(red: 0.02, green: 0.32, blue: 0.72)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        case .qishui:
+            return LinearGradient(colors: [Color(red: 0.05, green: 0.80, blue: 0.72), Color(red: 0.02, green: 0.45, blue: 0.58)], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
     }
 
@@ -27,6 +30,7 @@ enum LibraryProvider: String, CaseIterable, Identifiable {
         case .netease: return "cloud.fill"
         case .qq: return "play.rectangle.fill"
         case .kugou: return "music.note"
+        case .qishui: return "waveform"
         }
     }
 
@@ -35,6 +39,7 @@ enum LibraryProvider: String, CaseIterable, Identifiable {
         case .netease: return "BrandNetease"
         case .qq: return "BrandQQ"
         case .kugou: return "BrandKugou"
+        case .qishui: return nil
         }
     }
 }
@@ -45,6 +50,7 @@ private extension LibraryProvider {
         case .netease: return .netease
         case .qq: return .qq
         case .kugou: return .kugou
+        case .qishui: return .qishui
         }
     }
 }
@@ -78,6 +84,9 @@ struct LibraryView: View {
     @State private var kugouPlaylists: [Playlist] = []
     @State private var kugouLoading = false
     @State private var kugouSavedAt = Date.distantPast
+    /// 汽水音乐没有云端歌单同步：音乐库的汽水歌单列表恒为空，
+    /// 只在发现页 / 搜索页看推荐歌单与搜索歌单
+    @State private var qishuiPlaylists: [Playlist] = []
     @AppStorage("beans.uiStyle") private var uiStyleRaw = BeansUIStyle.liquid.rawValue
     private var libraryProviders: [LibraryProvider] { platformPrefs.enabledLibraryProviders }
 
@@ -109,6 +118,7 @@ struct LibraryView: View {
                 case .netease: return orderedNeteasePlaylists
                 case .qq: return orderedQQPlaylists
                 case .kugou: return orderedKugouPlaylists
+                case .qishui: return qishuiPlaylists
                 }
             },
             set: { value in
@@ -116,6 +126,7 @@ struct LibraryView: View {
                 case .netease: auth.playlists = value
                 case .qq: qqPlaylists = value
                 case .kugou: kugouPlaylists = value
+                case .qishui: qishuiPlaylists = value
                 }
                 SyncedPlaylistOrderStore.shared.save(value, source: source.songSource)
             }
@@ -166,6 +177,7 @@ struct LibraryView: View {
                             case .netease: playlistsSection
                             case .qq: qqSection
                             case .kugou: kugouSection
+                            case .qishui: qishuiSection
                             }
                         case "最近播放":
                             historySection
@@ -334,6 +346,7 @@ struct LibraryView: View {
         case .netease: return beansLocalized("网易云音乐歌单", "NetEase Cloud Music Playlists")
         case .qq: return "QQ 音乐收藏与歌单"
         case .kugou: return "酷狗云端歌单"
+        case .qishui: return "汽水音乐歌单"
         }
     }
 
@@ -553,6 +566,9 @@ struct LibraryView: View {
             await loadQQPlaylists(force: force)
         case .kugou:
             await loadKugouPlaylists(force: force)
+        case .qishui:
+            // 汽水音乐没有云端歌单可刷新
+            break
         }
     }
 
@@ -567,6 +583,15 @@ struct LibraryView: View {
     private var kugouSection: some View {
         VStack(alignment: .leading, spacing: 24) {
             kugouPlaylistsSection
+        }
+    }
+
+    /// 汽水模式整体内容：无登录、无云端歌单同步，
+    /// 歌单只在发现页（推荐歌单）与搜索页（歌单搜索）里看
+    private var qishuiSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "汽水音乐歌单")
+            EmptyStateView(icon: "music.note.list", text: "汽水音乐暂不支持歌单同步\n请去发现页看推荐歌单，或在搜索页搜歌单")
         }
     }
 
@@ -806,6 +831,8 @@ struct LibraryView: View {
             }
         case .kugou:
             ToastCenter.shared.show("酷狗歌单暂不支持新建")
+        case .qishui:
+            ToastCenter.shared.show("汽水音乐暂不支持新建歌单")
         }
     }
 
@@ -847,6 +874,8 @@ struct LibraryView: View {
             }
         case .kugou:
             ToastCenter.shared.show("酷狗歌单暂不支持删除")
+        case .qishui:
+            ToastCenter.shared.show("汽水音乐暂不支持删除歌单")
         }
     }
 

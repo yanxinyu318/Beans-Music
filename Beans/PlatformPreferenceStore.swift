@@ -129,6 +129,7 @@ extension LibraryProvider {
         case .netease: return .netease
         case .qq: return .qq
         case .kugou: return .kugou
+        case .qishui: return .qishui
         }
     }
 }
