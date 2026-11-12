@@ -332,7 +332,7 @@ struct Playlist: Identifiable, Hashable, Codable {
     /// 汽水音乐 19 位数字歌单 id（完整字符串；Playlist.id 只存后 15 位转成的 Int，
     /// 查详情时以 qishuiId 为准；其他平台为 nil。声明带默认值，旧缓存 JSON
     /// 里没有这个键时合成 Codable 用 decodeIfPresent 解码，不会坏掉旧缓存）
-    let qishuiId: String? = nil
+    var qishuiId: String? = nil
 
     init(id: Int, name: String, coverURL: URL?, trackCount: Int = 0, source: SongSource = .netease, qishuiId: String? = nil) {
         self.id = id
